@@ -1,0 +1,669 @@
+EPS_PON与周边模块连接关系图，绿色模块即为EPS_PON模块，EPS将上行数据传输给EPS_PON，并分发给XGEMAC、NGMAC、GMAC和EMAC；EQM将入队信息（包括帧长、通道号等）传输给EPS_PON，用于Report/DBRU的计算。
+2.1	功能描述
+EPS_PON模块主要实现下面的特性：
+	5182H支持GPON/xGPON上行16个TCONT，5182T支持xGPON上行32个TCONT；
+	支持10G EPON对称模式上行16个单播LLID，10G EPON非对称模式2.5G/1G模式上行16个单播LLID，EPON上行8个单播LLID。
+	支持32个T-CONT的DBRu或者16个LLID的Report计算，可查询配置Report/Dbru。Report/Dbru写操作进行单独配置保护；支持计算的IPG可配置，支持计算溢出告警。
+	支持平均帧长计算，可以配置是否进行平均帧长计算。
+	支持基于通道进行使能的Flush，支持对flush丢弃的报文进行分通道统计。
+	支持TCONT/LLID最大个数减半的优先级抢占模式，比如支持10G EPON 8个LLID优先级抢占模式。
+	支持TX_BUFFER内部FIFO发送水线门限可配置；
+	支持多模共享的TX_BUF_PON，并每从TX_BUF_PON的FIFO读出1个报文，都要向EPS反馈一个减信号，用于EPS进行PON低功耗统计。
+	支持TX_BUF_PON的FIFO通道数可配，支持32/16/8/4个通道的配置。
+
+信号
+表1 EPS_PON模块接口信号表
+Name	Width	Direction	Description
+TOP
+rst_dp_n	1	I	DP系统复位信号，低电平有效。
+clk_dp_sys	1	I	DP系统时钟信号。
+rst_xpon_sys_n	1	I	GMAC/EMAC系统复位信号，低电平有效。
+clk_xpon_sys	1	I	GMAC/EMAC系统时钟信号。
+GLO_DIO
+nni_mode	3	I	上行口模式配置：
+00：GPON； 01：EPON；1X：保留。
+EPS接口
+eps_pon_ecc_code	7	I	EPS和EPS_PON的带外ECC数据。EPS_PON只在NGPON 2.5G/10G两种模式下使用，其他模式兼容5118V100使用帧头信息带内ECC的方式。
+eps_pon_wr	1	I	EPS发送数据到EPS_PON帧数据写使能，高有效
+eps_pon_sop	1	I	EPS发送帧头指示，高有效
+eps_pon_eop	1	I	EPS发送帧尾指示，高有效
+eps_pon_mod	4	I	EPS发送帧尾有效字节指示，接收字节有效信号，当eop有效时，指示最后一个长字中的有效字节数：
+3’h0：表示16个字节有效；
+3’h1：表示高1个字节有效；
+3’h2：表示高2个字节有效；
+………
+3’hf：表示高15个字节有效（data[127:8]有效）。
+eps_pon_chid	5	I	当前发送数据的T_CONT/LLID号码（xEPON 0~15,xGPON 0~31）
+eps_pon_wdata	128	I	TxDMA发送到EPS_PON的数据和帧头信息
+pon_eps_eop_dec	1	O	EPS_PON发送帧到MAC结束指示
+注意：需要异步过渡成单脉冲信号
+pon_eps_req	32	O	EPS_PON数据请求信号
+pon_eps_rding_vld	1	O	EPS_PON 当前正在读TCONT/LLID NUM(one-hot code)有效信号。
+pon_eps_rding	5	O	EPS_PON 当前正在读TCONT/LLID NUM(one-hot code)。
+pon_eps_curr_vld	1	O	当前处于发送状态的TCONT/LLID NUM(one-hot code)有效信号。
+pon_eps_curr	5	O	当前处于发送状态的TCONT/LLID NUM(one-hot code)。
+pon_eps_next_vld	1	O	下一个将进入发送状态的TCONT/LLID NUM ( one-hot code)有效信号。
+pon_eps_next	5	O	下一个将进入发送状态的TCONT/LLID NUM ( one-hot code)。
+QM接口
+qm_inq_pulse	I	1	QM xPON帧入队脉冲
+qm_ inq_idx	I	5	EQM 入队帧信息0
+xGPON:bit[4:0]=T-CONT
+xEPON:bit[3:0]=LLID
+qm_ inq_idx	I	5	EQM 入队帧信息0
+xGPON:bit[4:0]=T-CONT
+xEPON:bit[3:0]=LLID
+qm _inq_pri	I	3	EQM 入队帧信息1
+xGPON:bit[0] scr
+xEPON:bit[2:0] pri
+qm_inq_len	1	14	QM xPON入队帧长度(包括FCS)
+GPON MAC接口
+gmac_dbru_req	1	I	GMAC 读DBRU请求
+gmac_dbru_tcnt	3	I	GMAC 想要读取DBRU的 T-CONT
+dbru_gmac_vlu	56	O	GMAC 读DBRU值：
+[55:28] scr=1 dbru 值
+[27: 0 ] scr=0 dbru 值
+
+gmac_pre_cur_vld	1	I	GMAC当前TCONT预调度有效
+gmac_pre_nxt_vld	1	I	GMAC 下一个TCONT预调度有效
+gmac_pre_cur_tid	3	I	GMAC当前预调度的TCONT
+gmac_pre_nxt_tid	3	I	GMAC 下一个预调度的TCONT
+
+gmac_eps_rd	1	I	GMAC 读请求
+gmac_eps_mod	2	I	GMAC 需要读的字节数（对4取模）
+gmac_eps_tcont	3	I	GMAC 要读取数据的T-CONT
+eps_gmac_rdy	1	O	EPS_PON准备好发送数据标识
+eps_gmac_vld	1	O	EPS_PON发送数据有效标识
+eps_gmac_sop	1	O	EPS_PON 发送数据sop
+eps_gmac_eop	1	O	EPS_PON发送数据eop
+eps_gmac_data	32	O	EPS_PON发送的数据
+gmac_qbyte	15	O	EPS_PON输出给GMAC的Qbyte值
+eps_gmac_flush_st	32	O	EPS_PON对GMAC反馈的FLUSH状态。
+XGEMAC接口
+eps_xgemac_req	O	16	EPS_PON LLID FIFO有数据发送请求
+eps_xgemac_vld	O	1	EMAC发送数据有效指示
+eps_xgemac_sop	O	1	XGEMAC发送数据帧头指示
+eps_xgemac_eop	O	1	XGEMAC发送数据帧位指示
+eps_xgemac_err	O	1	XGEMAC发送数据错误帧指示
+eps_xgemac_data	O	128	XGEMAC发送数据
+rpt_ xgemac_vlu	O	64	XGEMAC Report value,每次传送4个优先级的rpt值；
+非对称模式下，低16bit有效。
+rpt_ xgemac_avg	O	56	XGEMAC Average Length，每次传送4个优先级的平均帧长值；
+非对称模式下，低14bit有效。
+rpt_ xgemac_avg	O	56	XGEMAC Average Length，每次传送4个优先级的平均帧长值；
+非对称模式下，低14bit有效。
+xgemac_eps_rd	I	1	XGEMAC读使能
+xgemac_eps_lidx	I	4	XGEMAC读LLID Index
+xgemac_cur_vld	I	1	XGEMAC当前grant有效
+xgemac_cur_lidx	I	4	XGEMAC当前grant LLID Index
+xgemac_nxt_vld	I	1	XGEMAC下一个grant有效
+xgemac_nxt_lidx	I	4	XGEMAC下一个grant LLID Index
+xgemac_rpt_req	I	1	XGEMAC Report 请求
+xgemac_rpt_addr	I	8	XGEMAC Report 请求地址，地址组成为{fec,pri[2:0],lidx[3:0]}。
+在对称模式时只有低4比特有效，且xgemac每给1次Report 请求，EPS_PON固定延时2拍后把该LLID的8个优先级的report值和平均帧长两拍连续反馈给xgemac。第一拍表示{pri3,pri2,pri1,pri0}对应值；第二拍表示{pri7,pri6,pri5,pri4}对应值。
+在非对称模式时8比特全部有效，每次Report 请求只返回对应的一个rpt值和平均帧长。
+NGMAC接口
+ngmac_eps_cur_vld	I	1	NGMAC当前BWMAP有效指示
+ngmac_eps_cur_tid	I	5	NGMAC当前BWMAP对应T-CONT
+ngmac_eps_nxt_vld	I	1	NGMAC下一个BWMAP有效指示
+ngmac_eps_nxt_tid	I	5	NGMAC下一个BWMAP对应T-CONT
+ngmac_eps_rd	I	1	NGMAC读数据请求
+ngmac_eps_tcont	I	5	NGMAC读请求对应T-CONT
+ngmac_dbru_req	I	1	NGMAC DBRU请求
+ngmac_dbru_tcnt	I	5	NGMAC DBRU T-CONT
+eps_ngmac_rdy	O	1	NGMAC队列数据准备好
+eps_ngmac_vld	O	1	NGMAC数据有效指示
+eps_ngmac_sop	O	1	NGMAC帧头指示
+eps_ngmac_eop	O	1	NGMAC帧尾指示
+eps_ngmac_data	O	128	NGMAC帧数据
+dbru_ngmac_vlu	O	28	EPS_PON对NGMAC的RPT反馈值，单位Byt
+ngmac_flush_st[31:0]	O	32	EPS_PON对NGMAC反馈的FLUSH状态。
+
+表3 GMAC帧头信息
+Bit	Name	Description
+31:28	Rsvd	保留
+27:16	GEM Port-ID	GEM Port通道标识
+15	Rsvd	保留
+14	Scr	Scr
+13:0	Frm_len	指示帧长（包括FCS）
+
+NGPON 非对称2.5G/对称10G 帧头信息如下：
+Bit	Field	width	Description
+127:126	reserved	2	保留
+125:112	frm_flen	14	帧长（包括FCS）。
+111:108	reserved	4	保留
+107:96 	gemport_id	12	Gemport ID
+95:0	paylaod	96	帧数据的前12字节
+
+表6 TX_BUFF模块接口信号表
+Name	Width	Direction	Description
+TOP
+rst_n	1	I	系统复位信号，低电平有效。
+clk_sys	1	I	系统时钟信号。
+GLO_DIO
+nni_mode	2	I	上行口模式配置：
+00：GPON； 01：EPON；1X：GE
+EPS_PON_DIO接口
+EPS接口
+eps_pon_wr	1	I	EPS发送数据到EPS_PON使能信号
+eps_pon_sop	1	I	EPS发送帧头指示
+eps_pon_eop	1	I	EPS发送帧尾指示
+eps_pon_mod	3	I	EPS发送帧尾有效字节指示
+Mod=有效字节数mod8
+eps_pon_wchid	5	I	当前发送数据的T_CONT/LLID号码（xEPON 0~15，xGPON 0~31）
+eps_pon_wdata	128	I	EPS发送到EPS_PON的数据
+pon_eps_eop_dec	1	O	EPS_PON发送帧到MAC结束指示
+注意：需要异步过渡成单脉冲信号
+pon_eps_req	32	O	EPS_PON数据请求信号
+pon_eps_rding_vld	1	O	EPS_PON 当前正在读TCONT/LLID NUM(one-hot code)有效信号。
+pon_eps_rding	5	O	EPS_PON 当前正在读TCONT/LLID NUM(one-hot code)。
+pon_eps_curr_vld	1	O	当前处于发送状态的TCONT/LLID NUM(one-hot code)有效信号。
+pon_eps_curr	5	O	当前处于发送状态的TCONT/LLID NUM(one-hot code)。
+pon_eps_next_vld	1	O	下一个将进入发送状态的TCONT/LLID NUM ( one-hot code)有效信号。
+pon_eps_next	5	O	下一个将进入发送状态的TCONT/LLID NUM ( one-hot code)。
+QM接口
+qm_inq_pulse	I	1	QM xPON帧入队脉冲
+qm_ inq_idx	I	5	EQM 入队帧信息0
+xGPON:bit[4:0]=T-CONT
+xEPON:bit[3:0]=LLID
+qm _inq_pri	I	3	EQM 入队帧信息1
+xGPON:bit[0] scr
+xEPON:bit[2:0] pri
+qm_inq_len	1	14	QM xPON入队帧长度(包括FCS)
+GPON MAC接口
+gmac_dbru_req	1	I	GMAC 读DBRU请求
+gmac_dbru_tcnt	3	I	GMAC 想要读取DBRU的 T-CONT
+dbru_gmac_vlu	56	O	GMAC 读DBRU值：
+[55:28] scr=1 dbru 值
+[27: 0 ] scr=0 dbru 值
+
+gmac_pre_cur_vld	1	I	GMAC当前TCONT预调度有效
+gmac_pre_nxt_vld	1	I	GMAC 下一个TCONT预调度有效
+gmac_pre_cur_tid	3	I	GMAC当前预调度的TCONT
+gmac_pre_nxt_tid	3	I	GMAC 下一个预调度的TCONT
+
+gmac_eps_rd	1	I	GMAC 读请求
+gmac_eps_mod	2	I	GMAC 需要读的字节数（对4取模）
+gmac_eps_tcont	3	I	GMAC 要读取数据的T-CONT
+eps_gmac_rdy	1	O	EPS_PON准备好发送数据标识
+eps_gmac_vld	1	O	EPS_PON发送数据有效标识
+eps_gmac_sop	1	O	EPS_PON 发送数据sop
+eps_gmac_eop	1	O	EPS_PON发送数据eop
+eps_gmac_data	32	O	EPS_PON发送的数据
+gmac_qbyte	15	O	EPS_PON输出给GMAC的Qbyte值
+eps_gmac_flush_st	32	O	EPS_PON对GMAC反馈的FLUSH状态。
+XGEMAC接口
+eps_xgemac_req	O	16	EPS_PON LLID FIFO有数据发送请求
+eps_xgemac_vld	O	1	EMAC发送数据有效指示
+eps_xgemac_sop	O	1	XGEMAC发送数据帧头指示
+eps_xgemac_eop	O	1	XGEMAC发送数据帧位指示
+eps_xgemac_err	O	1	XGEMAC发送数据错误帧指示
+eps_xgemac_data	O	128	XGEMAC发送数据
+rpt_ xgemac_vlu	O	64	XGEMAC Report value,每次传送4个优先级的rpt值；
+非对称模式下，低16bit有效。
+rpt_ xgemac_avg	O	56	XGEMAC Average Length，每次传送4个优先级的平均帧长值；
+非对称模式下，低14bit有效。
+xgemac_eps_rd	I	1	XGEMAC读使能
+xgemac_eps_lidx	I	4	XGEMAC读LLID Index
+xgemac_cur_vld	I	1	XGEMAC当前grant有效
+xgemac_cur_lidx	I	4	XGEMAC当前grant LLID Index
+xgemac_nxt_vld	I	1	XGEMAC下一个grant有效
+xgemac_nxt_lidx	I	4	XGEMAC下一个grant LLID Index
+xgemac_rpt_req	I	1	XGEMAC Report 请求
+xgemac_rpt_addr	I	8	XGEMAC Report 请求地址，地址组成为{fec,pri[2:0],lidx[3:0]}。
+在对称模式时只有低4比特有效，且xgemac每给1次Report 请求，EPS_PON固定延时2拍后把该LLID的8个优先级的report值和平均帧长两拍连续反馈给xgemac。第一拍表示{pri3,pri2,pri1,pri0}对应值；第二拍表示{pri7,pri6,pri5,pri4}对应值。
+在非对称模式时8比特全部有效，每次Report 请求只返回对应的一个rpt值和平均帧长。
+NGMAC接口
+ngmac_eps_cur_vld	I	1	NGMAC当前BWMAP有效指示
+ngmac_eps_cur_tid	I	5	NGMAC当前BWMAP对应T-CONT
+ngmac_eps_nxt_vld	I	1	NGMAC下一个BWMAP有效指示
+ngmac_eps_nxt_tid	I	5	NGMAC下一个BWMAP对应T-CONT
+ngmac_eps_rd	I	1	NGMAC读数据请求
+ngmac_eps_tcont	I	5	NGMAC读请求对应T-CONT
+ngmac_dbru_req	I	1	NGMAC DBRU请求
+ngmac_dbru_tcnt	I	5	NGMAC DBRU T-CONT
+ngmac_qbyte	O	15	NGMAC队列净荷, EPS对NGMAC反馈的QBYTE状态。在gmac_eps_tcont变化的当拍有效
+eps_ngmac_rdy	O	1	NGMAC队列数据准备好
+eps_ngmac_vld	O	1	NGMAC数据有效指示
+eps_ngmac_sop	O	1	NGMAC帧头指示
+eps_ngmac_eop	O	1	NGMAC帧尾指示
+eps_ngmac_data	O	32	NGMAC帧数据
+dbru_ngmac_vlu	O	28	EPS_PON对NGMAC的RPT反馈值，单位Byt
+ngmac_flush_st[31:0]	O	32	EPS_PON对NGMAC反馈的FLUSH状态。
+RPT_CACL接口
+pon_mode_sel	5	O	同步后的NNI模式配置使能：
+[0] – GPON
+[1] – EPON模式或者XEPON非对称1G模式
+[2] – XEPON非对称2.5G模式
+[3] – XEPON对称10G模式
+[4] – NGPON非对称2.5G或者对称10G模式
+txb_rptc_dec	1	O	TXB_BUFF发送/flush数据指示
+txb_rptc_info	7	O	TXB_BUFF XPON发送/flush数据信息
+GPON：bit[5] scr, bit[4:0] TCONT ID
+EPON：bit[6:4] pri, bit[3:0] LLID
+txb_rptc_info	7	O	TXB_BUFF XPON发送/flush数据信息
+GPON：bit[5] scr, bit[4:0] TCONT ID
+EPON：bit[6:4] pri, bit[3:0] LLID
+txb_rptc_dec_len	14	O	TXB_BUFF XPON发送/flush数据长度
+qm_inq_pulse_syn	1	O	QM xPON帧入队脉冲（dp时钟异步过渡到xpon系统时钟）
+qm_inq_info_syn	7	O	QM XPON发送数据信息
+GPON：bit[5] scr, bit[4:0] TCONT ID
+EPON：bit[6:4] pri, bit[3:0] LLID
+qm_inq_len_syn	14	O	QM XPON发送数据长度
+
+3.1.1.3	功能描述
+	支持各种模式下的数据按通道缓存功能；
+	支持GPON切片按字节读取数据模式；
+	支持缓存FIFO反压功能；
+	32路FIFO状态可查询。
+	支持EPON和10G-EPON模式下的高优先级抢占。
+	支持TX_BUFFER内部FIFO发送水线门限软件可配功能；
+	支支持四模共享的TX_BUF_PON（4K）,并每从TX_BUF_PON的FIFO读出1个报文，都要向EPS反馈一个减信号，用于EPS进行PON低功耗统计。
+	支持TX_BUF_PON的FIFO通道数可配，支持32,16,8,4个通道的配置。
+
+3.1.1.4	设计思路
+3.1.1.4.1	上行数据分发
+每个FIFO规格：16X130（256字节），XGPON模式下32个TCONT最多32X16X130。
+EPS_PON根据EPS的TCONT指示，将数据缓存在各个FIFO中，等待MAC读取。
+1.	对于16*n + 1这种字节的报文，EPS在帧尾会浪费4拍cycle;
+2.	Pon_eps_rding在异步过渡跳变过程中可能会使EPS轮空4拍cycle。
+基于以上两个原因，添加txb_send_th配置水线，每次从txb_fifo读出eop后，只有在FIFO剩余数据大于等于水线配置时，rdy/req才有效发送下一帧报文。这样就可以吸收EPS帧间浪费cycle的延时，保证向PON MAC发送的数据不会帧内断流。
+a.EPON/10G-EPON模式
+当对应LLID FIFO非空时，向EMAC发起发送请求。EMAC根据当前带宽以及发送异步FIFO的状态向EPS_PON提起读请求。FIFO每读1行128bit，对称模式下直接读出传输128bit给MAC，非对称模式下，每次16bit从高位依次传输8次给MAC（高112bit位宽补0，帧尾按实际长度传输）。
+FIFO读空时，因为一行128bit的数据没有传输结束，需要继续给出req请求让MAC读取数据（方便处理可以通过帧尾所在128bit的位置判断是否给req请求）。
+b.GPON模式
+GMAC根据当前带宽告知EPS_PON需要发送的TCONT号，EPS_PON查询对应TCONT的FIFO是否非空，并且向GMAC指示rdy。GMAC根据rdy信号，Qbyte，当前带宽，决定上行切片大小。并向EPS_PON发起读请求，以及读取的字节数(1～4字节)。EPS_PON按照GMAC请求的字节数发送数据（数据从高位开始有效）。
+FIFO读空的处理和EPON模式类似。
+c.2.5G NGPON/10G NPON模式
+和10G XEPON对称模式类似，从FIFO读出一行128bit后，每次传输128bit给MAC。
+5182两种模式数据传输方式一致，因此2.5G NGPON模式和5118V100是有区别的，5118V100每拍传输给XGMAC是32bit。
+
+3.1.1.4.2	xGPON Qbyte
+EPS和EPS_PON可以联合保证不会出现帧内断流，因此qbyte可固定配置为最大值，GMAC可以根据报文整包长度封装GEM帧。
+5182 NGMAC已去除qbyte功能，因此已删除qbyte接口。
+3.1.1.4.3	xPON flush
+当xPON MAC下线后需要对应TCONT/LLID进行flush操作。由软件向EPS_PON发起对应的TCONT/LLID的flush开始和停止的动作，flush开始并且MAC没有读取数据的情况下，马上停止向MAC发送该TCONT/LLID的数据（如果报文发到一半也马上终止），MAC对应的TCONT/LLID请求马上无效。EPS_PON继续向EPS读数据并且丢弃直到flush停止，收到软件flush停止请求后，需要把整包丢弃完毕才能最终停止flush动作。
+对应的TCONT/LLID Flush过程中，优先调度没有被flush的TCONT/LLID数据给MAC。
+xGPON模式：
+直接并行输出32个TCONT的FLUSH状态信息，和5118V100实现方式一样。
+xEPON模式：
+EPON/10G-EPON模式无需向MAC输出FLUSH状态。
+3.1.1.4.4	优先级抢占模式
+支持所有PON模式的优先级抢占模式：
+xGPON:支持32个TCONT，优先级抢占最多支持16个TCONT，取ngmac_eps_tcont[3:0]低4bit，SP读取高优先级通道{ngmac_eps_tcont[3:0],1’b0}，然后{ngmac_eps_tcont[3:0],1’b1}。
+EPON:支持8个LLID，取xgemac_eps_lidx[2:0]的3bit，SP读取高优先级通道{xgemac_eps_llid[2:0],1’b0}，然后{xgemac_eps_llid[2:0],1’b1}。
+XEPON:支持16个LLID，取xgemac_eps_lidx[3:0]的4bit，SP读取高优先级通道{xgemac_eps_llid[3:0],1’b0}，然后{xgemac_eps_llid[3:0],1’b1}。
+
+3.1.1.4.5	Report/DBRU计算发送减脉冲
+EPON模式时，以整帧的方式向RPT_CALC发送减脉冲，并返回帧长（注意EPON帧头信息中的帧长是不包含FCS的，在给RPT_CALC返回减脉冲时帧长应该加上4字节的FCS）。最小减脉冲间隔，取决于数据通路中最小帧帧长。
+GPON模式时，每间隔16个时钟周期，或者当TCONT切换时，或者报文整包发送完毕时，向Report计算模块反馈这一段时间内GPON发送的有效字节数（此时GPON的数据中已经有FCS）。
+1，	软件交互界面
+配置寄存器：
+可配置同时flush数个TCONT/LLID数据通道，软件配置停止flush。
+状态寄存器：
+TX_BUFF数据FIFO深度可查询，基于TCONT/LLID
+TX_BUFF数据FIFO空满状态可查询
+
+中断寄存器：
+FIFO溢出中断（致命错误）
+EPS预调度错误，全局复位，并启动flush（flush和复位撤离之间没有关系）
+
+GMAC跨行读取中断（致命错误）
+GMAC工作异常，全局复位，并启动flush（flush和复位撤离之间没有关系）
+
+统计寄存器：
+TX_BUFF发送给MAC帧数据计数，基于TCONT/LLID
+TX_BUFF flush/溢出丢帧统计，基于TCONT/LLID
+
+3.1.2	RPT_CALC模块设计思路
+3.1.2.1.1	接口信号
+表7 RPT_CALC模块接口信号表
+Name	Width	Direction	Description
+TOP
+rst_n	1	I	系统复位信号，低电平有效。
+clk_sys	1	I	系统时钟信号。
+EPS_PON_DIO接口
+rpt_guard	1	I	Report/DBRU 溢出保护，高有效
+avg_en	1	I	逻辑更新平均帧长使能
+avg_coef	1	I	平均帧长计算系数。（平均帧长计算方法：new_avg ＝（old_avg（N-1） + new_len）/N。其中N＝2^（avg_coef＋1）
+avg_coef	1	I	平均帧长计算系数。（平均帧长计算方法：new_avg ＝（old_avg（N-1） + new_len）/N。其中N＝2^（avg_coef＋1）
+mpi_rpt_wr	1	I	Report/DBRU 平均帧长读写指示，高读低写
+mpi_rpt_addr	6	I	Report/DBRU 读取地址
+mpi_rpt_wdata	67	I	Report/DBRU 写入值
+rpt_mpi_ack	1	I	读或者写Report/DBRU RAM完成
+rpt_mpi_rdata	67	O	Report/DBRU读出值
+rptc_neg_overflow	1	O	Report/DBRU计算负溢出指示
+rptc_pos_overflow	1	O	Report/DBRU计算负溢出指示
+cmd_fifo_overun	1	O	Report/DBRU统计命令缓存FIFO溢出
+cmd_depth	5	O	Report/DBRU统计命令缓存FIFO深度
+TXB_BUFF接口
+pon_mode_sel	5	O	同步后的NNI模式配置使能：
+[0] – GPON
+[1] – EPON模式或者XEPON非对称1G模式
+[2] – XEPON非对称2.5G模式
+[3] – XEPON对称10G模式
+[4] – NGPON非对称2.5G或者对称10G模式
+txb_rptc_dec	1	O	TXB_BUFF发送/flush数据指示
+txb_rptc_info	7	O	TXB_BUFF XPON发送/flush数据信息
+GPON：bit[5] scr, bit[4:0] TCONT ID
+EPON：bit[6:4] pri, bit[3:0] LLID
+txb_rptc_dec_len	14	O	TXB_BUFF XPON发送/flush数据长度
+qm_inq_pulse_syn	1	O	QM xPON帧入队脉冲（dp时钟异步过渡到xpon系统时钟）
+qm_inq_info_syn	7	O	QM XPON发送数据信息
+GPON：bit[5] scr, bit[4:0] TCONT ID
+EPON：bit[6:4] pri, bit[3:0] LLID
+qm_inq_len_syn	14	O	QM XPON发送数据长度
+GPON MAC接口
+gmac_dbru_req	1	I	GMAC 读DBRU请求
+gmac_dbru_tcnt	3	I	GMAC 想要读取DBRU的 T-CONT
+dbru_gmac_vlu	56	O	GMAC 读DBRU值：
+[55:28] scr=1 dbru 值
+[27: 0 ] scr=0 dbru 值
+XGPON MAC接口
+ngmac_dbru_req	1	I	NGMAC 读DBRU请求
+ngmac_dbru_tcnt	4	I	NGMAC 想要读取DBRU的 T-CONT
+dbru_ngmac_vlu	28	O	NGMAC 读DBRU值：
+ [27: 0 ] dbru 值，单位byte
+XGEMAC MAC接口
+xgemac_rpt_req	1	I	XGEMAC 读Report请求
+rpt_ xgemac_vlu	O	64	XGEMAC Report value,对称模式每次传送4个优先级的rpt值；非对称模式或者EPON模式，低16bit有效。
+xgemac_rpt_addr	I	8	XGEMAC Report 请求地址，地址组成为{fec,pri[2:0],lidx[3:0]}。
+在对称模式时只有低4比特有效，且xgemac每给1次Report 请求，EPS_PON固定延时2拍后把该LLID的8个优先级的report值和平均帧长两拍连续反馈给xgemac。第一拍表示{pri3,pri2,pri1,pri0}对应值；第二拍表示{pri7,pri6,pri5,pri4}对应值。
+在非对称模式时8比特全部有效，每次Report 请求只返回对应的一个rpt值和平均帧长。
+rpt_ xgemac_avg	O	56	XGEMAC Average Length，每次传送4个优先级的平均帧长值；
+非对称模式下，低14bit有效。
+
+3.1.2.2	设计思路
+1，	Report/DBRU计算
+本节中提及的帧长均是指包含FCS的长度
+EPS_PON根据入队信息和出队信息，计算上行对应队列中数据缓存。
+入队信息来源：EQM帧入队信息
+出队信息来源：EPS根据EQM指示丢帧信息；EPS_PON发送出去的帧信息
+EPON Full report计算方法：
+ 
+在1G情况下最后实际上报的rpt值为：
+
+ceil(full_rpt/2)；
+在2.5G情况下最后实际上报的rpt值为：
+ceil(full_rpt/4)；
+在10G情况下最后实际上报的rpt值为：
+ceil(full_rpt/20)；
+
+GPON DBRU计算方法：（inc_len基于帧，加GEM header，dec_len，如果是帧尾则扣除GEM Header）
+ 
+实现细节：
+EQM inc间隔：至少8 cycle（125M时钟8cycle,异步过渡到100M时钟域，8*8/10 = 6cycle）
+EPS_PON dec 间隔：
+GPON：flush减操作最小间隔16拍一次，T-CONT切换时，连续两次dec至少6cycle的延迟（在1字节带宽时，最快可以3拍切换TCONT， 此情况很极限几乎不会出现，可忽略）。
+EPON：至少32cycle（和数据通路最小帧长有关），flush减操作最小间隔16拍一次。
+
+RPTC_CALC实现方式如上图所示：RPT_CALC将2个加减操作源(TX_BUFF,QM)汇入命令FIFO中。再从命令FIFO中读出，根据命令类型进行加减操作。加减操作周期为5cycles (2op/5cycles)。命令组成{op,info[5:0], len[10:0]}。使用Signal Port RAM存储Report计算值，MPI可以对Report值进行读写。
+需要RAM：Command FIFO 8×18 bit (RA)  Report 64×67bit (DP) 。大小推算如下：
+a，Command FIFO深度大小推算
+一般情形：	EQM增脉冲速度为 		1/6cycles 		(3)
+	      GPON口减脉冲速度为		1/6cycles		(4)
+	      因此需求计算量为: 		12/36 cycles 		(10)
+实际运算能力			2/5 cycles		(12)
+可见设计实现运算能力能够满足需求。因此FIFO深度只要大于2即可（一个正在计算，两个等待计算）。
+如果Report/DBRU RAM使用的是SRAM，因为MAC读RAM的优先级最高，那么EPON读report最极限的情况是46 cycles 读23次，隔拍读，46cycles之间间隔128cycles，连续出现8次128cycles，每次125us轮询，每次足够清空FIFO的命令，EPON 46 cycles最多会出现8+3个命令。
+10G-EPON非对称1G和2.5G模式和EPON一样，10G对称模式每个LLID每次读取8个优先级report，每个LLID至少间隔48ns(200M,9 cycle)，因此10G-EPON读report性能可以满足要求；
+GPON读DBRU最极限情况是40 cycles读8次，隔拍读，40cycles之间125us，也足够情况FIFO里的命令，GPON 40 cycles最多会出现14个命令。
+XGPON读DBRU最极限情况是每个TCONT 3拍读一次，共32个TCONT，96cycles读32次，每次间隔125us，也足够情况FIFO里的命令，GPON 96cycles最多会出现32个命令。96cycle可以运算38个命令。
+所以COMMAND FIFO深度是16可满足要求。 
+b，Report/DBRU RAM大小推算
+Report存储格式：{avg[41:28]，rpt(fec=0/1)/dbur(scr=0/1)[27:0]}；
+由于XGEMAC对称模式的读写要求，必须采用4块32X42的SP RAM实现以便支持XGEMAC的RPT读取，其中在（XG）EMAC模式下时RAM0存放每个通道的pri0，pri4的report值，RAM1存放每个通道的pri1，pri5的report值，RAM2存放每个通道的pri2，pri6的report值，RAM3存放每个通道的pri3，pri7的report值。
+
+GMAC模式，简化设计，只使用一个SP存储8个TCONT的dbru值(scr=0&&scr=1)。
+ 
+图14 GMAC模式dbru结构图
+NGMAC模式，简化设计，只使用一个SP存储32个TCONT的dbru值。
+ 
+图15 NGMAC模式dbru结构图
+
+2，	EPON平均帧长计算
+非对称模式下，需要计算16个LLID×8个Pri的平均帧长。平均帧长计算方法：
+对称模式下，需要计算16个LLID×8个Pri的平均帧长。平均帧长计算方法：
+采用迭代的方式计算，当前平均帧长由上一个平均帧长，当前帧长以及一个配置系数计算获得：
+ 
+复位后初始包长是64字节，发送报文大于64字节时平均帧长向上取整，反之向下取整。
+
+4	RAM&ECC
+4.1	RAM资源
+NAME	(width*depth)	NUM	TYPE	ECC	备注
+TX_BUFF	130x256	1	TP	-	
+RPTC	42x32	4	SP	-	计算DBRU/report的RAM
+
+4.2	ECC校验
+
+Bit	Field	width	Description
+127:126	reserved	2	保留
+125:114	gemport_id	12	Gemport ID
+113:100	pon_flen	14	帧长
+99	pcr_scr	1	PCR或者SCR
+98:96	qid_pri	3	队列优先级
+95:89	Ecc_gen	7	针对sop_data[127:96]的ECC生产码
+88:0	reserved	89	保留
+
+EPS_PON会对EPS的SOP帧头控制信息sop_data[127:96]做ECC校验，存在以下两种情况：
+1、	ECC 1bit错误，ECC自动纠错，上报1bit错误中断，软件不需要操作；
+ECC 2bit错误，ECC无法纠错，上报2bit错误中断，如果是pon_flen帧长错了，会出现EPS_PON和MAC接口数据挂死，出口堵塞的情况，一旦出现此情况，逻辑不可恢复，软件只能复位。
+
+5	表项冲突说明
+EPS_PON有xGPON dbru和xEPON report计算共用RPTC表项。RPTC总共有3个访问源：逻辑带宽计算写入，XGMAC/XGEMAC读表项，CPU间接读写表项。
+访问RPTC表项优先级如下：
+XGMAC/XGEMAC读表项 > 逻辑带宽计算写入 > CPU间接读写表项。
+
+6	异步处理说明
+1、eps_pon_eop异步处理
+clk_sys_dp -> clk_xpon_sys，在XPON时钟域采样DP时钟域的单脉冲信号eps_pon_eop。
+EPS_PON有两个时钟域，XPON系统时钟域：clk_xpon_sys（250M）,DP时钟域：clk_sys_dp(250M)。
+异步处理说明如下：
+1、	clk_dp时钟域，eps_pon_eop_syn采样eps_pon_eop间隔变成高低电平信号；
+2、	clk_xpon_sys时钟域，异步过渡CBB打2拍，eps_xpon_eop_ff2；
+3、	clk_xpon_sys时钟域，再打1拍，eps_xpon_eop_ff3；
+4、	利用eps_xpon_eop_ff2和eps_xpon_eop_ff3的上升沿和下降沿生成过渡后的eop信号；
+5、	因此eps_pon_eop的间隔最少要保证 >= 2*clk_xpon_sys才能保证采样正确； 
+
+from 5117 EPS的分析如下：
+1、EPS最小处理字节报文（3*clk_dp）；
+2、ASIC版本rw_mode = 0，固定奇偶读写（2*clk_dp)；
+
+5182的eps_pon_eop最小间隔4*clk_dp，clk_dp最高时钟250M，5*4ns = 20ns > 2*5ns = 10ns；满足>=2*clk_xpon_sys的要求。
+设计注意点：这里只对同一通道的eop有要求：
+1、	eop必须是单脉冲信号；
+2、	两个eop之间间隔大于等于4拍； 
+
+MAC预调度信号异步处理
+clk_xpon_sys -> clk_sys_dp，EPS_PON需要把MAC的预调度信号异步过渡到DP时钟域传给EPS进行数据预调度处理，由于预调度信号都是缓变信号，异步过渡处理的方式直接把clk_xpon_sys时钟域MAC送过来的预调度信号直接使用clk_sys_dp打2拍做异步处理传给EPS。
+预调度信号直接异步打拍的影响：预调度信号是多比特信号，在通道跳变的时刻，异步采样可能会采样到错误的预调度通道，EPS对于没有数据的通道不会调度的，对于错误的预调度通道号，会调度IFB 160B/EFB 256B一个切片的数据到EPS的TX_BUFF里。就是说，预调度通道跳变的时刻可能会少调度一个切片到EPS的TXBUFF中，由于EPS的调度性能远大于MAC的线速，因此在MAC带宽分配的预调度时间内，即使在通道跳变开始的时刻少调度了一个切片数据，但是在预调度要求时间内EPS肯定可以完成MAC带宽需要的数据调度。因此没有MAC报文欠载和带宽浪费的风险。
+3、pon_eps_eop_dec异步处理
+clk_xpon_sys -> clk_sys_dp。需要把发送给MAC的eps_xmac_eop信号异步过渡给EPS，eps_xmac_eop是单脉冲信号。由于DP时钟存在动态调频的情况，5182H最低频率50MHZ，两个异步时钟频差大，并且是低频采样高频时钟，因此不能使用拓展脉冲异步打拍的方式处理。
+采用异步FIFO的方式是最安全稳妥的，eps_xmac_eop直接写入异步FIFO，读侧非空即读，把读有效信号送给EPS即是pon_eps_eop_dec异步处理完成的信号。
+出口有PON的业务情况下(EQM PON队列非空)，clk_dp最低时钟250/2=125M，clk_xpon_sys固定250M时钟，假设FIFO异步过渡需要打3拍：
+1、	异步FIFO空到非空的异步过渡延时T0 = clk_xpon_sys（写地址打1拍）+2*clk_dp（异步过渡打2拍）+1*clk_dp（空信号判断打1拍）+ = 4ns+3*8ns = 28ns；
+2、	异步FIFO读有效传递到写时钟域延时T1 = clk_dp + 2*clk_xpon_sys + clk_xpon_sys= 8+3*4 = 20ns；
+
+3、	因此FIFO深度需要吸收T0+T1时间内所有通道的EOP的有效数据；
+4、	T0+T1 = 28+20 = 48ns，最极限情况每拍都有eop，48/clk_xpon_sys = 12，因此FIFO深度至少需要11深度才能吸收异步过渡的延时。
+反推clk_dp的所需的最低频率：
+1）	FIFO深度需要吸收T0+T1时间内所有通道的EOP的有效数据；
+2）	FIFO深度是16，clk_xpon_sys = 5ns；
+3）	T0+T1/clk_xpon_sys < 16；clk_dp < 15ns；clk_dp > 66.6MHZ。
+综上所述，扩大异步FIFO深度到16，保证FIFO不会写溢出。
+ 
+2、	EQM入队报文脉冲异步处理
+clk_sys_dp -> clk_xpon_sys，qm_inq_pulse是单脉冲信号，最快8拍有效一次，并且clk_sys_dp最高250M频率，clk_xpon_sys是固定250M，使用拓展脉冲异步打拍的方式存在风险，因此采用异步FIFO的方式安全稳妥。
+qm_inq_pulse是异步FIFO的写信号，qm_data是异步FIFO的读数据，读侧非空即读，读有效信号即是异步处理完成的信号qm_inq_pulse_syn，读数据即是异步处理完成qm_data_syn。
+clk_xpon_sys固定时钟250M，clk_sys_dp最快时钟250M，假设FIFO异步过渡需要打2拍：
+1、	异步FIFO空到非空的异步过渡延时T0 = 3*clk_xpon_sys+clk_sys_dp = 3*4+4 = 16ns；
+2、	异步FIFO读有效传递到写时钟域延时T1 = 3*clk_sys_dp+clk_xpon_sys = 3*4+4 = 16ns；
+3、	因此FIFO深度需要吸收T=T0+T1时间内qm_inq_pulse出现的有效个数；
+4、	T=T0+T1=32ns，qm_inq_pulse最快8拍1个，clk_sys_dp=4ns，32/8*4=1，因此T时间内最多出现1个qm_inq_pulse，因此设置异步FIFO最小深度是8可以吸收T时间内的qm_inq_pulse。
+反推clk_sys_dp需要的最低频率Xns：
+1）	FIFO深度是8；
+2）	(T0+T1)/8*X < 8；X>0.5625ns，X<1.77Ghz
+Clk_sys_dp最高频率1.77Ghz，最低频率没要求，因为clk_sys_dp频率越低，qm_inq_pusle来的越慢。
+
+8	EPS_PON重点关注内容
+8.1	EPS_PON TXBUFF深度
+ASIC 版本 EPS_PON 异步FIFO深度的计算：
+
+ 
+
+假设EPS_PON 的异步FIFO将满水线为Y，空闲深度为X，EPS的数据延时为N(req拉高到数据写入FIFO的延时)。当反压信号req 拉低后，fifo的空闲深度X必须能吸收PiPeline上所有数据，所以X >= N， 又由于EPS ASIC是按照奇偶读，最快2拍出一个数据，所以有X >= N/2。
+当反压信号撤销后，EPS可以重新发数据，FIFO将满水线Y的值应该设置到能确保EPS发送的第一个数据到达EPS_PON的FIFO写端口之前FIFO不被读空，才能保证FIFO不欠载。
+
+如上图所示： 
+Tw ： FIFO写时钟周期，即DP_SYS时钟，400MHz，2.5ns
+Tr  ： FIFO读时钟周期，即XPON_SYS时钟，200MHz, 5ns
+Tr2w : 异步FIFO中读指针过渡到写时钟域的时间
+Tw2r: 异步FIFO中写指针过渡到读时钟域的时间
+
+假设FIFO内数据刚好等于将满水线Y，afull为高，反压有效，无新的数据写入。此时,在t0时刻FIFO开始读数据，经过Tr2w的时间，达到t1时刻，afull撤销（即FIFO开始读数据，将满状态信号并不会立即拉低，需要经过Tr2w才会拉低），req拉高，EPS开始采样到req信号为高开始发送数据。经过N*Tw时间后数据到达FIFO的写端口，再经过Tw2r的时间（写指针过渡到读时钟域），到达t2时刻，新到达的数据才会影响到FIFO的empty状态。
+假如读出FIFO内所有旧数据的时间为（t3-t0），那么t3应该大于t2, empty才不会被拉高。
+
+由于目前的SD5182里异步fifo的读写指针的gray码是打3拍过渡的，那么过渡时间最大为
+Tr2w：1Tr(同步前先寄存) + 4*Tw (相位刚好错开，最大是4拍) + 1Tw（afull拉低后下一拍才会被采样到）
+即 Tr2w = Tr + 5Tw = 5 + 5*2.5 = 17.5ns
+
+Tw2r：1Tw(同步前先寄存) + 4*Tr (相位刚好错开的情况下最大是4拍) + 1Tr（empty拉低后下一拍才会被采样到）
+即Tw2r = Tw+ 5Tr = 2.5 + 5*5 = 27.5
+
+那么，要想t2 < t3, 则要 Tr2w + N*Tw + Tw2r < Y*Tr  ，ASIC模式下N最大为6，Tw=2.5ns, Tr = 2ns 。则，
+
+Tr2w + 6*Tw + Tw2r  <  (Y *128bit / 10Gbps)    
+即
+60ns  <  (Y *128bit / 10Gbps)  可得， Y  >  4.7
+
+则FIFO深度至少为 X+Y +1(sop) =  6/2 + 5+1 = 9 , SOP 是控制信息，为无效数据,所以需要加1。
+
+若DP在非10G-EPON对称模式时降频为200MHz, Tw=Tr=5ns，此时上行的链路带宽较少，最高2.5Gbps，MAC接口位宽为32bit, 而FIFO数据位宽为128bit，则t3的时间可以认为是Y*Tr*4。 
+
+而 Tr2w = Tr + 5Tw = 30ns
+Tw2r = Tw+ 5Tr = 30ns
+6*Tw = 30ns
+30ns + 30ns + 30ns  <  Y*128bit/ 2.5Gbps ， 可得 Y > 1.8
+则FIFO深度至少为 X+Y+1(sop) = 6/2 + 2 +1 = 6， SOP 是控制信息，为无效数据。
+8.2	EPS_PON TX_BUFF切TCONT水线
+5116T FPGA 测试问题：
+
+GPON 模式下，在MAC切换TCONT的时候，如果切换后EPS_PON的相应TCONT 的Tx_fifo内数据较少，
+且新的数据没有及时从EPS获得补充的话就会发生欠载（FPGA上会引发dbru负溢出和跨行读取,上行直接挂死）。 
+所以，SD5116T在切TCONT时同样需要EPS_PON Tx_buff  rdy 水线起作用才能防止欠载。
+水线计算：
+1. GMAC 的rding/curr 指示信号过渡到EPS的延时： 
+          latency_a = 1*xpon_sys_clk + 3*dp_sys_clk；   （在EPS_PON 用xpon_sys_clk打1拍， dp_sys_clk打2拍送到EPS（正确采样最大为3拍））
+2. EPS看到rding/curr有效到相应通道的数据发出的延时：
+          latency_b = 6*dp_sys_clk；
+3. EPS_PON的接口异步fifo的写使能有效到影响fifo_cnt的延时：
+          latency_c =  1 dp_sys_clk + 5 xpon_sys_clk；     （gray码在dp时钟域打1拍 + xpon时钟打3拍（正确采样最大为4拍）异步过渡 + 1拍xpon_sys  fifo_cnt采样 （有效下一拍采样））
+所以，从gmac的读使能有效，产生rding指示，到EPS新来的数据影响EPS_PON fifo_cnt超过水线的总延时为： 
+          latency  = latency_a + latency_b + latency_c = 10*dp_sys_clk + 6*xpon_sys_clk
+由于FPGA上dp_sys_clk为75MHz， ASIC上最低为83MHz， 为了FPGA和ASIC水线的配置值统一，取dp_sys_clk最低为75MHz.  xpon_sys_clk 固定为100MHz, 则rdy水线Y 需要满足：
+ latency  <  （(Y -1）*128bit） /  1.25Gbps)     
+可得， Y  >=2  
+
+8.3	5118V100 XGPON 切TCONT水线问题
+现象：XGPON 单TCONT FIX 1M 带宽，最后一个报文的尾数据压在EPS_PON出不去。
+配置和状态：EPS_PON存在一个切TCONT的水线，就是每次切TCONT的时候，检测FIFO的数据是否满足水线要求才决定是否给XGMAC RDY。通过debug信息看到切TCONT水线默认配置2，FIFO残留一行数据，并且是包括EOP的。
+原因：目前EPS_PON的RDY设计在不满足切TCONT水线时，RDY无效，但是如果FIFO里有EOP，RDY信号就不判断切TCONT水线，会给出RDY有效信号。
+问题关键在于目前EPS_PON设计在切TCONT的第一拍是会固定检测切TCONT水线，不管FIFO里是否有EOP，在切TCONT的第二拍才判断FIFO里有EOP并给出RDY，但是XGMAC在切TCONT的第一拍判读没有RDY后就不等EPS_PON的RDY信号开始封帧了。
+ 即使EPS_PON在切TCONT的第二拍后面给出RDY，XGMAC也不会去取数据，FIX 1M 每帧分配带宽只有16字节（8+8），因此就会重复出现以下的时序，每次切到TCONT0时，由于EPS_PON的第一拍RDY没给出来，XGMAC自己就封IDLE帧发包了，然后就一直无限循环此过程导致EPS_PON FIFO的最后一行数据发不出去。
+ FIX 2M带宽以上无此问题，因为TCONT0至少会持续两个报文，第二个报文有RDY可以顺利抽走EPS_PON的数据。
+解决方案：和wanyuxi确认了下XGMAC的切片封帧机制，可知目前EPS_PON的切TCONT水线在XGPON模式下无用，因为切TCONT的第一拍有数据必须给RDY，不给RDY的话，XGMAC就开始自己封IDLE帧，因此解决方案就是在XGPON模式下，把切TCONT水线配置0即可，实测结果OK。
+欠载风险分析：由于异步过渡延时，EPS接到的pon_eps_rding_vld/pon_eps_curr_vld信号会比XGMAC传递的xgmac_eps_rd/xgmac_pre_cur_vld晚6拍(dp_clk)左右，所以从当前TCONT切换到其他TCONT时，EPS的调度也会相应延时，只要EPS的调度延时足够长，调度足够的数据到当前TCONT的TX_BUFF，等到下次再回到当前TCONT时，TX_BUFF准备好的数据就不会欠载。
+因此只要TCONT调度时，xgmac_eps_rd/xgmac_pre_cur_vld 持续最少4拍，异步过渡到pon_eps_rding_vld/pon_eps_curr_vld也最少4拍(dp_clk)，EPS在TCONT切换时就会至少调度2拍16 byte(dp_clk)给EPS_PON，那么EPS_PON的FIFO就不会出现只剩1行16字节的情况存在欠载的风险。
+分析可知，只有最小带宽下，xgmac_eps_rd/xgmac_pre_cur_vld才会持续最短，目前产品使用的最小带宽就是FIX 1M，从ST 仿真波形可见并和wanyuxi确认，FIX 1M下，xgmac_pre_cur_vld至少会持续5拍（xpon_sys_clk），即使xgmac_eps_rd没有满足至少持续4拍的条件，EPS的调度pon_eps_rding_vld >pon_eps_curr_vld，EPS也会在TCONT切换时，在有数据的前提下至少调度2拍16 byte(dp_clk)给EPS_PON，实际波形pon_eps_curr_vld持续8拍(dp_clk)。
+优先级抢占模式，FIX 1M下，xgmac_pre_cur_vld至少会持续5拍（xpon_sys_clk）
+那么实际异步过渡到EPS的pon_eps_curr_vld会有8拍，因为预调度信号异步过渡是使用异步FIFO实现，只要FIFO非空就读，DP时钟比XPON时钟快，如下波形所示，会经常出现FIFO读空的情况，目前做法在FIFO空的时候pon_eps_curr_vld会保持，因此pon_eps_curr_vld最少会有8拍，在优先权抢占模式下，假设rding无效，EPS会根据pon_eps_curr_tcont做RR轮询，8拍至少能保证此tcont的两个通道最少都有2*128 bit的数据。
+综上所述，在优先级抢占模式下，EPS_PON的切TCONT水线配置0（实际效果就是关闭切TCONT水线）也是不会出现欠载的风险的。GPON模式无此问题，因为GMAC切tcont第一拍无rdy不会封IDLE帧。
+
+9	5118V200修改点
+9.1	增加适配NGMAC模式
+5182的NGPON非对称2.5G和10G接口时序一样，修改也一样。
+1、	根据计算，每个TCONT的tx_buff深度需要增加1倍，8x130 -> 16x130。
+2、	实现方式和XEPON对称10G模式类似，EPS 128bit进，通过tx_buff 读出128bit送给NGMAC。
+3、	TX_BUFF子模块增加适配模式的dbru计算。
+9.2	5118V100 XGPON切TCONT水线问题
+问题背景参考5.3，修改后结果，报文切片过程中，TCONT切换时（除了头片以外），必须在TCONT切换的当拍给出rdy，不然NGPON就会插入idle帧，报文错误。
+9.3	修改异步过渡打拍CBB
+5118V100异步过渡打拍CBB是使用修改过的CBB，5182需要修改为原CCB，通过在CCB继续打拍的方式满足异步过渡打拍要求。
+9.4	5182 EPS_PON TXBUFF水线计算
+9.4.1	Tx_buff发送水线计算
+假设发送水线是X，计算如下：
+Rding信号异步延时（4*dp_clk + 1*xpon_clk） + Eps数据发送延时(6*dp_clk) + tx_buff异步FIFO延时(1*dp_clk + 4*xpon_clk) <= X*128bit/10Gbps
+对称10G模式：  dp_clk = 250M,xpon_clk = 250M。
+4*4 + 4 + 6*4 + 4 + 4*4ns <= X*128bit/10Gbps，X>= 5 + 1(sop帧头信息) = 6
+非对称2.5G模式：dp_clk = 250M/166M,xpon_clk = 250M。
+dp_clk = 250M，X>= 2 + 1(sop帧头信息) = 3。
+非对称1G模式： dp_clk = 166/100M,xpon_clk = 250M。
+dp_clk = 100M，X>= 2 + 1(sop帧头信息) = 3。
+9.4.2	Tx_buff切tcont水线计算
+xEPON没有切片的情况，因此不需要考虑LLID切换的情况，发送水线即可保证。
+xGPON的切片情况下的TCONT切换，由于EPS延时和异步过渡延时，需要配置tx_buff水线保证报文数据不欠载，计算过程与发送水线类似。
+正常情况下，切tcont水线不需要考虑 rding信号异步延时（4*dp_clk + 1*xpon_clk），因为此延时在tcont切走时会补充EPS调度数据到切走的tcont的tx_buff中。
+为了保持统一，切tcont水线可以与发送水线配置一致。
+9.5	预调度FIFO读数据使用读有效信号寄存修改
+9.6	和MAC确认的问题
+1、NGPON非对称2.5G模式，每拍数据32bit？高位补0？
+答：NGPON 2.5G和10G模式，数据格式一样，sop帧头信息和报文数据都是128bit，对于EPS_PON来说只需透传即可，无需进行数据位宽整理。
+2、NGPON最快读取dbru的情况？是否和5118V100 XGPON非对称2.5G模式一样？dbru是否区分scr?
+答：NGPON极限情况是在上行2.5G时，所有的tcont带宽只上报dbru，每个TCONT 3拍读一次，共32个TCONT，96cycles读32次，每次间隔125us。
+dbru不区分scr。
+以上均和5118V100 XGPON极限情况一致。
+3、NGPON对称10G模式对rdy信号的要求是否和5118V100 XGPON非对称2.5G模式一样？比如切TCONT需要及时响应rdy信号
+答：和5118V100 XGPON情况一样，切tcont需要及时响应rdy，不然就会插idle帧。
+
+5182H相对5118V2修改点
+11.1	txb_fifo_of异步处理修改
+EPS_PON中异步txb_fifo的txb_fifo_of上溢是作为debug信号连接到eps_pon_dio模块。
+1）txb_fifo_of是单脉冲信号，时钟域是clk_sys_dp，频率范围50M ~ 250M；
+2）eps_pon_dio时钟域是clk_xpon_sys，唯一频点200M；
+
+如果txb_fifo_of是250M的单脉冲信号，会存在200M时钟异步采样错误的方式， 并且debug此信号时只需关注FIFO异常出现过历史状态，无需关注FIFO异常出现的次数，以下条件可以忽略：
+1）	txb_fifo_of是否单脉冲信号；
+2）txb_fifo_of有效间隔时间；
+因此，可以采用单bit异步过渡握手同步的异步处理方式，此方式无需关注异步过渡两侧时钟的频率和相位关系。
+以上异步处理过程，可采用参数化公共模块的方式实现，可参数化如下：
+异步过渡打拍时钟数参数化。
+11.2	eps_pon_eop异步处理修改
+eps_pon_eop异步过渡方式需要修改，参考异步过渡章节，目前异步过渡打2拍。 
+11.3	qm_inq_xxx异步处理修改
+qm_inq_inc/qm_inq_len/qm_inq_idx异步过渡方式需要修改，参考异步过渡章节, 目前异步过渡打2拍。
+11.4	pon_eps_eop_dec异步处理修改
+pon_eps_eop_dec异步过渡FIFO深度需要扩大到16；
+
+11.5	TX_BUFF深度修改
+11.5.1	异步过渡延时分析
+TXB_BUFF深度分析，参考9.4.1章节：Tr2w + N*Tw + Tw2r < Y*Tr。
+clk_dp最高频率250M，clk_xpon_sys固定250M时钟。
+Tw = 4ns；Tr = 4ns；N=6。
+Tr2w：1Tr(同步前先寄存) + 4*Tw (相位刚好错开，最大是4拍) + 1Tw（afull拉低后下一拍才会被采样到）
+即 Tr2w = Tr + 5Tw = 4+ 5*4 = 24ns；
+Tw2r：1Tw(同步前先寄存) + 4*Tr (相位刚好错开的情况下最大是4拍) + 1Tr（empty拉低后下一拍才会被采样到）
+即Tw2r = Tw+ 5Tr = 4 + 5*4 = 24ns；
+假设NGMAC存在突发，物理性能可达128bit*250M=32Gbps：
+Tr2w + 6*Tw + Tw2r  <  (Y *128bit / 32Gbps)  
+24+6*4+24 < (Y *128bit / 32Gbps)
+Y > 18，FIFO空闲深度X=6，因此TX_BUFF深度至少要满足 X+Y+1(SOP) = 25深度才能满足最恶劣的条件下，FIFO不会被读空的情况。
+1）clk_dp = 250M；
+2）异步FIFO过渡打3拍；
+3）NGMAC突发速率达到32Gbps。
+
+11.5.2	NGMAC突发速率分析
+在TCONT刚开始调度的时刻，NGMAC存在瞬时突发速率128bit*250M=32Gbps，突发时间取决于NGMAC的异步SDU_FIFO深度，目前可知深度是16，因此TX_BUFF需要吸收NGMAC突发速率的深度分析如下：
+EPS与EPS_PON的接口性能是128bit*250M/2=16Gbps，那么TX_BUFF需要缓存的深度是
+(32Gbps-16Gbps)*16*4ns/128bit=8，其中16是NGMAC的SDU_FIFO深度，4ns是clk_xpon_sys时钟。
+综上所述，TX_BUFF深度建议从每个通道16扩大到32可以满足NGMAC的性能要求，面积增加128bit*16*16 = 4K bit。
+
+11.6	Report表项深度修改
+5118v2的report表项规格：
+1、	XEPON 10G对称模式，支持16 LLID+8 PRI，不区分FEC；
+2、	XEPON 1G/2.5G非对称模式，只支持8 LLID+8 PRI，区分FEC；
+5182H的report表项规格：
+1、	XEPON 10G对称模式，支持16 LLID+8 PRI，不区分FEC；
+2、	XEPON 1G/2.5G非对称模式，支持16 LLID+8 PRI，区分FEC；
+
+因此5182H为了可以支持XEPON 非对称模式16个LLID的规格，report表项需要在5118V2的基础上扩大一倍才可以满足规格要求。
+5118V2的report表项由4块42*32的SPRAM组成，面积4*42*32=5376bit。
+5182H的report表项比5118V2扩大一倍，由4块42*64的SPRAM组成，面积4*42*64=10752bit。
